@@ -46,6 +46,7 @@ const fileSub = el("file-sub");
 const fileContent = el<HTMLTextAreaElement>("file-content");
 const fileCopy = el<HTMLButtonElement>("file-copy");
 const fileDownload = el<HTMLButtonElement>("file-download");
+const fileShare = el<HTMLButtonElement>("file-share");
 const fileClear = el<HTMLButtonElement>("file-clear");
 const textareaStats = el("textarea-stats");
 
@@ -123,6 +124,33 @@ function formatReset(at: Date): string {
 
 function basename(path: string): string {
   return path.split("/").pop() || path;
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // The async Clipboard API needs a secure context, so it is unavailable if
+    // the dev server is reached over plain http on the LAN. Fall back to a
+    // temporary selection.
+    const scratch = document.createElement("textarea");
+    scratch.value = text;
+    scratch.setAttribute("readonly", "");
+    scratch.style.position = "fixed";
+    scratch.style.top = "-1000px";
+    document.body.append(scratch);
+    scratch.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    scratch.remove();
+    return copied;
+  }
 }
 
 /* ── Auth ───────────────────────────────────────────────────────────── */
@@ -423,6 +451,8 @@ function updateFileActions(): void {
   fileCopy.disabled = empty;
   fileDownload.disabled = empty;
   fileClear.disabled = empty;
+  // A link can only be built for a model loaded from a repository.
+  fileShare.disabled = textureContext === null;
 }
 
 function updateStats(): void {
@@ -459,9 +489,7 @@ async function loadResult(index: number): Promise<void> {
     owner,
     repo,
     path: item.path,
-    htmlUrl: item.repository.htmlUrl
-      ? `${item.repository.htmlUrl}/blob/HEAD/${item.path}`
-      : item.htmlUrl,
+    htmlUrl: item.repository.htmlUrl ? blobUrl(owner, repo, item.path) : item.htmlUrl,
   });
 }
 
@@ -471,6 +499,46 @@ interface LoadRequest {
   path: string;
   ref?: string;
   htmlUrl?: string;
+}
+
+function blobUrl(owner: string, repo: string, path: string, ref?: string): string {
+  // GitHub resolves `HEAD` to the repository's default branch.
+  return `https://github.com/${owner}/${repo}/blob/${ref ?? "HEAD"}/${path}`;
+}
+
+/**
+ * A deep link that reopens this exact model. Encoded as repo/path/ref rather
+ * than a nested absolute URL so the link stays readable.
+ */
+function shareUrl(): string | null {
+  const context = textureContext;
+  if (!context) return null;
+
+  const url = new URL(location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("repo", `${context.owner}/${context.repo}`);
+  url.searchParams.set("path", context.path);
+  if (context.ref) url.searchParams.set("ref", context.ref);
+
+  // URLSearchParams escapes "/" as %2F, which is legal but unreadable. A slash
+  // never needs escaping in a query string, so put it back.
+  url.search = url.search.replace(/%2F/g, "/");
+  return url.toString();
+}
+
+/** Reads a share link out of the current URL, if one is present. */
+function sharedModelRequest(): LoadRequest | null {
+  const params = new URLSearchParams(location.search);
+  const repo = params.get("repo");
+  const path = params.get("path");
+  if (!repo || !path) return null;
+
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) return null;
+
+  const ref = params.get("ref") ?? undefined;
+  return { owner, repo: name, path, ref, htmlUrl: blobUrl(owner, name, path, ref) };
 }
 
 async function loadFromRepo(request: LoadRequest): Promise<void> {
@@ -503,8 +571,9 @@ async function loadFromRepo(request: LoadRequest): Promise<void> {
     await renderPreview(content.text);
   } catch (error) {
     if (isAbort(error)) return;
-    setFileContent("");
     textureContext = null;
+    setFileContent("");
+    updateFileActions();
     setStatus(fileStatus, describeError(error), "error");
     modelViewer?.clear();
     setStageMessage(describeError(error), "error");
@@ -635,12 +704,22 @@ fileContent.addEventListener("input", () => {
 
 fileCopy.addEventListener("click", async () => {
   if (!fileContent.value) return;
-  try {
-    await navigator.clipboard.writeText(fileContent.value);
+  if (await copyText(fileContent.value)) {
     setStatus(fileStatus, "Copied to clipboard", "ok");
-  } catch {
+  } else {
     fileContent.select();
     setStatus(fileStatus, "Press Ctrl/Cmd+C to copy", "warn");
+  }
+});
+
+fileShare.addEventListener("click", async () => {
+  const link = shareUrl();
+  if (!link) return;
+
+  if (await copyText(link)) {
+    setStatus(fileStatus, "Link copied to clipboard", "ok");
+  } else {
+    window.prompt("Copy this link to the model:", link);
   }
 });
 
@@ -663,9 +742,10 @@ fileClear.addEventListener("click", () => {
   }
   renderToken += 1;
 
-  setFileContent("");
-  activeIndex = -1;
   textureContext = null;
+  setFileContent("");
+  updateFileActions();
+  activeIndex = -1;
   setFileMeta("", "", "");
   setStatus(fileStatus, "");
   modelViewer?.clear();
@@ -689,3 +769,7 @@ if (token) {
 updateFileActions();
 updateNav();
 setView("preview");
+
+// A share link (?repo=…&path=…) opens that model straight away, no search needed.
+const shared = sharedModelRequest();
+if (shared) void loadFromRepo(shared);
