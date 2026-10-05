@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitHub .bbmodel Viewer</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>GitHub <span class="accent">.bbmodel</span> Viewer</h1>
+      <p class="tagline">
+        Search public GitHub repositories for Blockbench models and preview them without
+        downloading anything.
+      </p>
+    </header>
+
+    <main class="layout">
+      <!-- ── Left: settings + search + results ──────────────────── -->
+      <aside class="sidebar">
+        <section class="panel" id="auth-panel">
+          <div class="panel-head">
+            <h2>Settings</h2>
+            <span class="status" id="auth-status">No token</span>
+          </div>
+
+          <div class="row">
+            <input
+              id="token-input"
+              type="password"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="ghp_… or github_pat_…"
+            />
+            <button id="token-save" class="btn btn-primary">Save</button>
+            <button id="token-clear" class="btn btn-ghost" hidden>Clear</button>
+          </div>
+
+          <p class="hint">
+            Create a token at
+            <a
+              href="https://github.com/settings/tokens/new?description=bbmodel-viewer&amp;scopes="
+              target="_blank"
+              rel="noreferrer noopener"
+              >github.com/settings/tokens</a
+            >
+            — no scopes are needed for public repositories. It is kept in this browser's
+            localStorage and forwarded to <code>api.github.com</code> by the local dev server.
+          </p>
+        </section>
+
+        <section class="panel" id="search-panel">
+          <div class="panel-head">
+            <h2>Find a model</h2>
+            <span class="status" id="search-status"></span>
+          </div>
+
+          <div class="row">
+            <input
+              id="search-input"
+              type="search"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="spider.bbmodel   ·   or paste a link"
+            />
+            <button id="search-button" class="btn btn-primary">Search</button>
+          </div>
+
+          <p class="hint">
+            A bare term gets <code>extension:bbmodel</code> appended. You can also paste a
+            <code>search?q=…</code>, <code>blob</code>, or <code>raw.githubusercontent.com</code> URL
+            to load a file directly.
+          </p>
+
+          <ul id="results" class="results"></ul>
+
+          <div class="pager" id="pager" hidden>
+            <button id="page-prev" class="btn btn-ghost btn-sm">‹ Prev</button>
+            <span class="pager-info" id="page-info"></span>
+            <button id="page-next" class="btn btn-ghost btn-sm">Next ›</button>
+            <select id="per-page" class="select" title="Results per page" aria-label="Results per page">
+              <option value="10">10 / page</option>
+              <option value="30" selected>30 / page</option>
+              <option value="50">50 / page</option>
+              <option value="100">100 / page</option>
+            </select>
+          </div>
+        </section>
+      </aside>
+
+      <!-- ── Right: preview + source ────────────────────────────── -->
+      <section class="panel content-panel" id="file-panel" data-view="preview">
+        <div class="panel-head">
+          <h2>Model preview</h2>
+          <span class="status" id="file-status"></span>
+        </div>
+
+        <div class="file-meta">
+          <a id="file-link" class="file-name" target="_blank" rel="noreferrer noopener" hidden></a>
+          <span class="file-sub" id="file-sub"></span>
+        </div>
+
+        <div class="row row-tight">
+          <div class="tabs" role="tablist" aria-label="Model view">
+            <button
+              id="tab-preview"
+              class="tab is-active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="preview-stage"
+            >
+              3D preview
+            </button>
+            <button
+              id="tab-source"
+              class="tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="file-content"
+            >
+              Source
+            </button>
+          </div>
+          <span class="spacer"></span>
+          <span class="textarea-stats" id="textarea-stats"></span>
+        </div>
+
+        <div class="row row-tight">
+          <label class="field">
+            <span class="field-label">Animation</span>
+            <select id="animation-select" class="select" disabled>
+              <option value="">None</option>
+            </select>
+          </label>
+          <span class="spacer"></span>
+          <button id="file-copy" class="btn btn-ghost" disabled>Copy</button>
+          <button id="file-download" class="btn btn-ghost" disabled>Download</button>
+          <button id="file-clear" class="btn btn-ghost" disabled>Clear</button>
+        </div>
+
+        <div class="stage" id="preview-stage">
+          <div id="canvas-container" class="canvas-container"></div>
+          <div class="stage-message" id="preview-message">
+            Pick a search result on the left, or paste a .bbmodel file's contents into the Source tab.
+          </div>
+        </div>
+
+        <textarea
+          id="file-content"
+          spellcheck="false"
+          placeholder="Paste a .bbmodel file's contents here…"
+        ></textarea>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
