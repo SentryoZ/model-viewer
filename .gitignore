@@ -3,6 +3,8 @@ dist
 dist-ssr
 *.local
 .DS_Store
+.idea/
+.vscode/
 .env
 .env.*
 !.env.example

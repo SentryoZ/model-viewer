@@ -158,6 +158,75 @@ function toRadians(value: unknown): THREE.Euler {
   );
 }
 
+interface RotationFrame {
+  time: number;
+  degrees: [number, number, number];
+}
+
+/**
+ * Keeps every interpolated hop well under 180 degrees. A hop of 90 degrees of
+ * body rotation is 45 degrees in quaternion space, so the dot product stays
+ * firmly positive and three never has to pick a "shortest path" that reverses
+ * the intended direction.
+ */
+const MAX_ROTATION_STEP_DEGREES = 90;
+
+/**
+ * Builds a quaternion track from Euler keyframes.
+ *
+ * Quaternion interpolation always takes the shortest arc, so a pair of keyframes
+ * more than 180 degrees apart collapses to no movement at all — a `0 -> 360`
+ * spin plays as a frozen part (Blockbench interpolates each Euler axis
+ * linearly, so it spins). Walking the Euler path in small steps preserves the
+ * full rotation while still landing exactly on each authored keyframe.
+ */
+function buildRotationTrack(
+  name: string,
+  frames: RotationFrame[],
+): THREE.QuaternionKeyframeTrack | null {
+  if (frames.length === 0) return null;
+
+  const times: number[] = [];
+  const values: number[] = [];
+
+  const push = (time: number, degrees: [number, number, number]): void => {
+    const quaternion = new THREE.Quaternion().setFromEuler(toRadians(degrees));
+    times.push(time);
+    values.push(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+  };
+
+  let previous: RotationFrame | null = null;
+
+  for (const frame of frames) {
+    const span = previous ? frame.time - previous.time : 0;
+
+    // Equal timestamps cannot be subdivided without producing duplicate times,
+    // which three rejects.
+    if (previous && span > 0) {
+      const delta = Math.max(
+        Math.abs(frame.degrees[0] - previous.degrees[0]),
+        Math.abs(frame.degrees[1] - previous.degrees[1]),
+        Math.abs(frame.degrees[2] - previous.degrees[2]),
+      );
+      const steps = Math.ceil(delta / MAX_ROTATION_STEP_DEGREES);
+
+      for (let step = 1; step < steps; step += 1) {
+        const t = step / steps;
+        push(previous.time + span * t, [
+          previous.degrees[0] + (frame.degrees[0] - previous.degrees[0]) * t,
+          previous.degrees[1] + (frame.degrees[1] - previous.degrees[1]) * t,
+          previous.degrees[2] + (frame.degrees[2] - previous.degrees[2]) * t,
+        ]);
+      }
+    }
+
+    push(frame.time, frame.degrees);
+    previous = frame;
+  }
+
+  return new THREE.QuaternionKeyframeTrack(name, times, values);
+}
+
 /* ── Model assembly ─────────────────────────────────────────────────── */
 
 interface BuiltModel {
@@ -429,8 +498,7 @@ function buildModel(
 
       const keyframes = [...animator.keyframes].sort((a, b) => a.time - b.time);
 
-      const rotationTimes: number[] = [];
-      const rotationValues: number[] = [];
+      const rotationFrames: RotationFrame[] = [];
       const positionTimes: number[] = [];
       const positionValues: number[] = [];
 
@@ -439,11 +507,10 @@ function buildModel(
         if (!point) continue;
 
         if (keyframe.channel === "rotation") {
-          rotationTimes.push(keyframe.time);
-          const quaternion = new THREE.Quaternion().setFromEuler(
-            toRadians([point.x, point.y, point.z]),
-          );
-          rotationValues.push(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+          rotationFrames.push({
+            time: keyframe.time,
+            degrees: [toNumber(point.x), toNumber(point.y), toNumber(point.z)],
+          });
         } else if (keyframe.channel === "position") {
           positionTimes.push(keyframe.time);
           const rest = boneRestPositions[targetUuid] ?? new THREE.Vector3();
@@ -455,11 +522,8 @@ function buildModel(
         }
       }
 
-      if (rotationTimes.length > 0) {
-        tracks.push(
-          new THREE.QuaternionKeyframeTrack(`${bone.uuid}.quaternion`, rotationTimes, rotationValues),
-        );
-      }
+      const rotationTrack = buildRotationTrack(`${bone.uuid}.quaternion`, rotationFrames);
+      if (rotationTrack) tracks.push(rotationTrack);
       if (positionTimes.length > 0) {
         tracks.push(
           new THREE.VectorKeyframeTrack(`${bone.uuid}.position`, positionTimes, positionValues),

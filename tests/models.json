@@ -1,0 +1,22 @@
+[
+  { "repo": "onixary/shape-shifter-curse-fabric", "path": "3d_models/entity/t_spider.bbmodel", "note": "baseline cube model" },
+  { "repo": "onixary/shape-shifter-curse-fabric", "path": "3d_models/player_form/spider/anim/form_spider_1_anim.bbmodel", "note": "animated, unsorted keyframes" },
+  { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/wheel.bbmodel", "note": "0 -> 360 spin (sub-180 subdivision)" },
+  { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/gun.bbmodel", "note": "6 of 8 elements hidden helpers" },
+  { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/rika.bbmodel", "note": "animated" },
+  { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/toad.bbmodel", "note": "animated" },
+  { "repo": "MineLittlePony/MineLittlePony", "path": "assets/dragon.bbmodel", "note": "mesh elements + no groups array" },
+  { "repo": "Gilgames32/vixen", "path": "model.bbmodel", "note": "mesh elements, 14 textures" },
+  { "repo": "tomast1337/betasharp", "path": "BetaSharp/assets/models/entities/spider.bbmodel", "note": "no textures, elements with no faces key" },
+  { "repo": "hammy275/immersive-mc", "path": "model/TestCube.bbmodel", "note": "no textures, single cube" },
+  { "repo": "hammy275/immersive-mc", "path": "model/BagDetailed.bbmodel", "note": "inline group metadata" },
+  { "repo": "quek04/undergarden", "path": "models/mog.bbmodel", "note": "modded_entity_flip_y = true" },
+  { "repo": "quek04/undergarden", "path": "models/denizen.bbmodel", "note": "inline group metadata" },
+  { "repo": "quek04/undergarden", "path": "models/rotbelcher.bbmodel", "note": "animated" },
+  { "repo": "quek04/undergarden", "path": "models/auxron.bbmodel", "note": "large model" },
+  { "repo": "DaFuqs/Spectrum", "path": "raw/models/manxi.bbmodel", "note": "inline group metadata" },
+  { "repo": "MysticMods/Roots", "path": "raw/model/house.bbmodel", "note": "inline group metadata, java_block" },
+  { "repo": "CSneko/toNeko", "path": "models/grmmy_neko.bbmodel", "note": "animated_entity_model" },
+  { "repo": "LudoCrypt/The-Corners", "path": "Corvus.bbmodel", "note": "modded_entity" },
+  { "repo": "alegian/thavma", "path": "raw-assets/book.bbmodel", "note": "java_block, outliner of element refs only" }
+]
