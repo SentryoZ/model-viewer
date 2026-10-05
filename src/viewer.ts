@@ -135,6 +135,29 @@ function isFiniteVec3(value: unknown): value is Vec3 {
   );
 }
 
+/**
+ * Blockbench stores animation values as strings, and editing a field can leave a
+ * whitespace-only entry behind — this model's `body` rotation is `["-2", "0",
+ * "\n\n"]`. `parseFloat("\n\n")` is NaN, and a single NaN rotation poisons the
+ * quaternion and every descendant's world matrix, so whole limbs silently
+ * vanish. Anything unparseable is treated as 0 (i.e. no change).
+ */
+function toNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = parseFloat(String(value ?? "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Degrees → radians for an [x, y, z] triple, tolerating junk entries. */
+function toRadians(value: unknown): THREE.Euler {
+  const vec = Array.isArray(value) ? value : [0, 0, 0];
+  return new THREE.Euler(
+    THREE.MathUtils.degToRad(toNumber(vec[0])),
+    THREE.MathUtils.degToRad(toNumber(vec[1])),
+    THREE.MathUtils.degToRad(toNumber(vec[2])),
+  );
+}
+
 /* ── Model assembly ─────────────────────────────────────────────────── */
 
 interface BuiltModel {
@@ -299,11 +322,7 @@ function buildModel(
       pivot.userData.globalPosition = pivotOrigin.clone();
 
       mesh.position.copy(center).sub(pivotOrigin);
-      pivot.rotation.set(
-        THREE.MathUtils.degToRad(rotation[0]),
-        THREE.MathUtils.degToRad(rotation[1]),
-        THREE.MathUtils.degToRad(rotation[2]),
-      );
+      pivot.rotation.copy(toRadians(rotation));
       pivot.add(mesh);
       object = pivot;
     } else {
@@ -355,11 +374,7 @@ function buildModel(
     boneRestPositions[group.uuid] = localPosition.clone();
 
     if (group.rotation) {
-      bone.rotation.set(
-        THREE.MathUtils.degToRad(group.rotation[0]),
-        THREE.MathUtils.degToRad(group.rotation[1]),
-        THREE.MathUtils.degToRad(group.rotation[2]),
-      );
+      bone.rotation.copy(toRadians(group.rotation));
     }
 
     parent.add(bone);
@@ -426,21 +441,16 @@ function buildModel(
         if (keyframe.channel === "rotation") {
           rotationTimes.push(keyframe.time);
           const quaternion = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler(
-              THREE.MathUtils.degToRad(parseFloat(String(point.x ?? 0))),
-              THREE.MathUtils.degToRad(parseFloat(String(point.y ?? 0))),
-              THREE.MathUtils.degToRad(parseFloat(String(point.z ?? 0))),
-              "XYZ",
-            ),
+            toRadians([point.x, point.y, point.z]),
           );
           rotationValues.push(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
         } else if (keyframe.channel === "position") {
           positionTimes.push(keyframe.time);
           const rest = boneRestPositions[targetUuid] ?? new THREE.Vector3();
           positionValues.push(
-            rest.x + parseFloat(String(point.x ?? 0)),
-            rest.y + parseFloat(String(point.y ?? 0)),
-            rest.z + parseFloat(String(point.z ?? 0)),
+            rest.x + toNumber(point.x),
+            rest.y + toNumber(point.y),
+            rest.z + toNumber(point.z),
           );
         }
       }

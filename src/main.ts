@@ -54,6 +54,9 @@ const tabSource = el<HTMLButtonElement>("tab-source");
 const canvasContainer = el("canvas-container");
 const previewMessage = el("preview-message");
 const animationSelect = el<HTMLSelectElement>("animation-select");
+const modelPrev = el<HTMLButtonElement>("model-prev");
+const modelNext = el<HTMLButtonElement>("model-next");
+const modelPosition = el("model-position");
 
 /* ── State ──────────────────────────────────────────────────────────── */
 
@@ -64,7 +67,15 @@ let token = loadToken();
 let viewer: Viewer | null = null;
 
 let results: CodeSearchItem[] = [];
-let activeSha: string | null = null;
+/**
+ * Position of the loaded model within `results`, or -1.
+ *
+ * Deliberately an index rather than the item's `sha`: that is a content hash, so
+ * identical copies of a model across (or within) repos share it and selecting
+ * one would light up all of them. Same filename is not a safe key either —
+ * same-named files in different repos can hold different content.
+ */
+let activeIndex = -1;
 let searchController: AbortController | null = null;
 let fileController: AbortController | null = null;
 
@@ -174,38 +185,64 @@ function handleTokenClear(): void {
 
 /* ── Results ────────────────────────────────────────────────────────── */
 
-function renderResults(): void {
+function renderResults(resetScroll = false): void {
   resultsEl.replaceChildren();
-  if (results.length === 0) return;
+  updateNav();
 
-  const fragment = document.createDocumentFragment();
+  if (results.length > 0) {
+    const fragment = document.createDocumentFragment();
 
-  for (const item of results) {
-    const li = document.createElement("li");
-    li.className = "result";
-    if (item.sha && item.sha === activeSha) li.classList.add("is-active");
+    results.forEach((item, index) => {
+      const li = document.createElement("li");
+      li.className = "result";
+      if (index === activeIndex) li.classList.add("is-active");
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "result-button";
-    button.addEventListener("click", () => {
-      void loadFile(item);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "result-button";
+      button.addEventListener("click", () => {
+        void loadResult(index);
+      });
+
+      const repo = document.createElement("span");
+      repo.className = "result-repo";
+      repo.textContent = item.repository.fullName || "unknown repository";
+
+      const path = document.createElement("span");
+      path.className = "result-path";
+      path.textContent = item.path;
+
+      button.append(repo, path);
+      li.append(button);
+      fragment.append(li);
     });
 
-    const repo = document.createElement("span");
-    repo.className = "result-repo";
-    repo.textContent = item.repository.fullName || "unknown repository";
-
-    const path = document.createElement("span");
-    path.className = "result-path";
-    path.textContent = item.path;
-
-    button.append(repo, path);
-    li.append(button);
-    fragment.append(li);
+    resultsEl.append(fragment);
   }
 
-  resultsEl.append(fragment);
+  // Emptying and refilling the list happens in one synchronous block, so no
+  // layout pass clamps the scroll offset and the previous page's position
+  // survives. A fresh set of results should start at the top.
+  if (resetScroll) resultsEl.scrollTop = 0;
+}
+
+/* ── Result navigation ──────────────────────────────────────────────── */
+
+function updateNav(): void {
+  const total = results.length;
+  const selected = activeIndex >= 0 && activeIndex < total;
+
+  modelPrev.disabled = !selected || activeIndex === 0;
+  modelNext.disabled = total === 0 || (selected && activeIndex >= total - 1);
+  modelPosition.textContent = total === 0 ? "–" : `${selected ? activeIndex + 1 : "–"} / ${total}`;
+}
+
+function step(delta: number): void {
+  if (results.length === 0) return;
+  // With nothing selected yet, start at the top of the list.
+  const next = activeIndex < 0 ? 0 : activeIndex + delta;
+  if (next < 0 || next >= results.length) return;
+  void loadResult(next);
 }
 
 /* ── Pagination ─────────────────────────────────────────────────────── */
@@ -404,15 +441,19 @@ function setFileContent(content: string): void {
   updateStats();
 }
 
-async function loadFile(item: CodeSearchItem): Promise<void> {
+async function loadResult(index: number): Promise<void> {
+  const item = results[index];
+  if (!item) return;
+
+  activeIndex = index;
+  renderResults();
+  resultsEl.children[index]?.scrollIntoView({ block: "nearest" });
+
   const [owner, repo] = item.repository.fullName.split("/");
   if (!owner || !repo) {
     setStatus(fileStatus, "Could not determine the repository for this result.", "error");
     return;
   }
-
-  activeSha = item.sha || null;
-  renderResults();
 
   await loadFromRepo({
     owner,
@@ -515,9 +556,9 @@ async function runSearch(page = 1): Promise<void> {
     currentPage = page;
     totalCount = response.totalCount;
     results = response.items;
-    activeSha = null;
+    activeIndex = -1;
 
-    renderResults();
+    renderResults(true);
     renderPager();
 
     if (results.length === 0) {
@@ -584,6 +625,9 @@ animationSelect.addEventListener("change", () => {
   modelViewer?.playAnimation(animationSelect.value);
 });
 
+modelPrev.addEventListener("click", () => step(-1));
+modelNext.addEventListener("click", () => step(1));
+
 fileContent.addEventListener("input", () => {
   updateStats();
   schedulePreview();
@@ -620,7 +664,7 @@ fileClear.addEventListener("click", () => {
   renderToken += 1;
 
   setFileContent("");
-  activeSha = null;
+  activeIndex = -1;
   textureContext = null;
   setFileMeta("", "", "");
   setStatus(fileStatus, "");
@@ -643,4 +687,5 @@ if (token) {
 }
 
 updateFileActions();
+updateNav();
 setView("preview");

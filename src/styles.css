@@ -160,6 +160,8 @@ a {
 
 .row-tight {
   margin-top: 12px;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 
 .spacer {
@@ -424,6 +426,22 @@ textarea:focus,
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.nav-position {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  min-width: 54px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .field-label {
