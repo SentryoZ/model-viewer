@@ -19,5 +19,7 @@
   { "repo": "MysticMods/Roots", "path": "raw/model/house.bbmodel", "note": "inline group metadata, java_block; 32x32 image with a 16x16 UV space, no clips" },
   { "repo": "CSneko/toNeko", "path": "models/grmmy_neko.bbmodel", "note": "animated_entity_model" },
   { "repo": "LudoCrypt/The-Corners", "path": "Corvus.bbmodel", "note": "modded_entity" },
-  { "repo": "alegian/thavma", "path": "raw-assets/book.bbmodel", "note": "java_block, outliner of element refs only" }
+  { "repo": "wolfool/Simmer", "path": "models/pot.bbmodel", "note": "43 elements, one inside a group named 'hitbox' which must not be drawn" },
+  { "repo": "zeshan321/ActionHealth", "path": "compat/e2e/fixtures/bigmob.bbmodel", "note": "body + a 'hitbox' group holding one cube" },
+  { "repo": "alegian/thavma", "path": "raw-assets/book.bbmodel", "note": "java_block, outliner of element refs only; 1 untextured face" }
 ]

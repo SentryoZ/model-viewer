@@ -180,7 +180,11 @@
         const elements = bbmodel.elements || [];
         for (const element of elements) {
           for (const face of Object.values(element.faces || {})) {
+            // Faces without a uv keep default UVs, and faces without a texture use
+            // the 1x1 placeholder and keep default UVs too — either would widen the
+            // measured range to the full 0..1 and look like a mismatch.
             if (!face || !face.uv) return null;
+            if (typeof face.texture !== "number") return null;
           }
         }
 
@@ -230,6 +234,96 @@
           "UV scale mismatch: got " + fmt(minU, maxU, minV, maxV) +
           " expected " + fmt(expected.minU, expected.maxU, expected.minV, expected.maxV)
         );
+      }
+
+      /**
+       * Whether a clip's keyframes actually describe movement. A clip with a single
+       * keyframe per channel — or repeating values — is static by design and must
+       * not be reported as frozen.
+       */
+      function clipShouldMove(animation) {
+        for (const animator of Object.values(animation.animators || {})) {
+          const byChannel = {};
+          for (const keyframe of animator.keyframes || []) {
+            (byChannel[keyframe.channel] = byChannel[keyframe.channel] || []).push(keyframe);
+          }
+          for (const keyframes of Object.values(byChannel)) {
+            if (keyframes.length < 2) continue;
+            const values = new Set(keyframes.map((k) => JSON.stringify(k.data_points[0])));
+            if (values.size > 1) return true;
+          }
+        }
+        return false;
+      }
+
+      /**
+       * A face with no texture reference must use the 1x1 placeholder, not the
+       * model's first texture. Hitbox and collision elements are the common case:
+       * real faces with no texture set, which used to come out smeared with the
+       * main texture. Elements that are not drawn at all are excluded.
+       */
+      function blankTextureProblem(bbmodel, metaElements) {
+        let untexturedFaces = 0;
+        for (const element of bbmodel.elements || []) {
+          if (element.uuid && metaElements.has(element.uuid)) continue;
+          for (const face of Object.values(element.faces || {})) {
+            if (!face) continue;
+            if (face.texture === undefined || face.texture === null) untexturedFaces += 1;
+          }
+        }
+        if (untexturedFaces === 0) return null;
+
+        let placeholders = 0;
+        let realMaps = 0;
+        scene.traverse((node) => {
+          const materials = Array.isArray(node.material)
+            ? node.material
+            : node.material
+              ? [node.material]
+              : [];
+          for (const material of materials) {
+            const image = material.map && material.map.image;
+            if (!image || !image.width) continue;
+            if (image.width === 1) placeholders += 1;
+            else realMaps += 1;
+          }
+        });
+
+        if (placeholders === 0) {
+          return (
+            untexturedFaces + " face(s) have no texture but the placeholder was never used" +
+            " (real maps: " + realMaps + ")"
+          );
+        }
+        return null;
+      }
+
+      /**
+       * Collision helpers are metadata and must not be drawn. They are either
+       * cubes named "hitbox" or cubes sitting inside a group named "hitbox".
+       * Returns the set of element uuids that should be hidden.
+       */
+      function metaElementUuids(bbmodel) {
+        const groups = {};
+        for (const group of bbmodel.groups || []) groups[group.uuid] = group;
+        const names = {};
+        for (const element of bbmodel.elements || []) names[element.uuid] = String(element.name || "");
+
+        const isMeta = (name) => /hit\s*_?\s*box/i.test(String(name || ""));
+        const meta = new Set();
+
+        const walk = (nodes, insideMeta) => {
+          for (const node of nodes) {
+            if (typeof node === "string") {
+              if (insideMeta || isMeta(names[node])) meta.add(node);
+            } else {
+              const group = groups[node.uuid] || node;
+              walk(node.children || [], insideMeta || isMeta(group.name));
+            }
+          }
+        };
+        walk(bbmodel.outliner || [], false);
+        return meta;
       }
 
       function poseSignature() {
@@ -306,9 +400,27 @@
             problems.push("static model has a texture sliced into flipbook frames");
           }
 
+          let parsedModel = null;
           try {
-            const uvProblem = uvScaleProblem(JSON.parse(text));
+            const parsed = JSON.parse(text);
+            const meta = metaElementUuids(parsed);
+
+            const uvProblem = uvScaleProblem(parsed);
             if (uvProblem) problems.push(uvProblem);
+
+            const blankProblem = blankTextureProblem(parsed, meta);
+            if (blankProblem) problems.push(blankProblem);
+
+            // Collision helpers must not be drawn, so the viewer's element count
+            // has to exclude them.
+            const total = (parsed.elements || []).length;
+            if (meta.size > 0 && loaded.elements > total - meta.size) {
+              problems.push(
+                "hitbox elements are still drawn: reported " + loaded.elements +
+                " of " + total + ", expected " + (total - meta.size),
+              );
+            }
+            parsedModel = parsed;
           } catch {
             /* unparsable model: the loader would have thrown already */
           }
@@ -334,14 +446,29 @@
               problems.push("rest rotation discarded at t=0 (" + restSnap.toFixed(1) + "deg snap)");
             }
 
-            const poses = new Set();
-            for (let i = 0; i < POSES_TO_SAMPLE; i += 1) {
-              mixer.update(0.1);
-              poses.add(poseSignature());
+            // Every clip that its own keyframes say should move must actually move.
+            // Sampling only the auto-played clip would call a model frozen whenever
+            // its first clip happens to be a single-keyframe idle.
+            const byName = new Map((parsedModel && parsedModel.animations
+              ? parsedModel.animations
+              : []
+            ).map((a) => [a.name, a]));
+            const frozen = [];
+            for (const name of loaded.animations) {
+              const data = byName.get(name);
+              if (!data || !clipShouldMove(data)) continue;
+
+              viewer.playAnimation(name);
+              const poses = new Set();
+              for (let i = 0; i < POSES_TO_SAMPLE; i += 1) {
+                mixer.update(0.1);
+                poses.add(poseSignature());
+              }
+              if (poses.size > poseCount) poseCount = poses.size;
+              if (poses.size < MIN_POSES_WHEN_ANIMATED) frozen.push(name);
             }
-            poseCount = poses.size;
-            if (poses.size < MIN_POSES_WHEN_ANIMATED) {
-              problems.push("animation frozen (" + poses.size + " pose)");
+            if (frozen.length > 0) {
+              problems.push("animation frozen: " + frozen.slice(0, 3).join(", "));
             }
             if (hasNonFiniteTransform()) problems.push("NaN transform after animating");
           }

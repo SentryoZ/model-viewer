@@ -303,6 +303,38 @@ function buildModel(
   const elementObjects: Record<string, THREE.Object3D> = {};
   const elements = bbmodel.elements ?? [];
   let skipped = 0;
+  let hidden = 0;
+
+  const groupMap: Record<string, BBGroup> = {};
+  for (const group of bbmodel.groups ?? []) groupMap[group.uuid] = group;
+
+  /**
+   * Collision helpers must not be drawn at all — they are metadata, not geometry.
+   * Blockbench authors either wrap them in a group named "hitbox" (Simmer's pot,
+   * ActionHealth's bigmob) or just name the cube that (cosmere's vinebud_hitbox).
+   *
+   * Deliberately narrow: "barrier" and "collision" are left out because models
+   * *of* real barriers and collision props legitimately use those words.
+   */
+  const isMetaName = (name: unknown): boolean => /hit\s*_?\s*box/i.test(String(name ?? ""));
+
+  const elementNames = new Map<string, string>();
+  for (const element of elements) {
+    if (element.uuid) elementNames.set(element.uuid, String(element.name ?? ""));
+  }
+
+  const hiddenElements = new Set<string>();
+  const collectHidden = (nodes: BBOutlinerNode[], insideMeta: boolean): void => {
+    for (const node of nodes) {
+      if (typeof node === "string") {
+        if (insideMeta || isMetaName(elementNames.get(node))) hiddenElements.add(node);
+        continue;
+      }
+      const group = groupMap[node.uuid] ?? node;
+      collectHidden(node.children ?? [], insideMeta || isMetaName(group.name));
+    }
+  };
+  collectHidden(bbmodel.outliner ?? [], false);
 
   /**
    * Rest rotation in degrees, per bone/element uuid.
@@ -325,6 +357,12 @@ function buildModel(
 
   for (const element of elements) {
     const { from, to, faces = {}, origin, rotation, uuid, visibility } = element;
+
+    // Collision helpers (groups or cubes named "hitbox") are metadata: no mesh.
+    if (uuid && hiddenElements.has(uuid)) {
+      hidden += 1;
+      continue;
+    }
 
     // Mesh elements (type: "mesh") are free-form and carry `vertices` instead of
     // from/to, and malformed exports can hold nulls. Skipping one bad element is
@@ -354,8 +392,15 @@ function buildModel(
         return;
       }
 
-      const textureIndex = typeof face?.texture === "number" ? face.texture : 0;
-      const texture = textures[textureIndex] ?? textures[0] ?? blankTexture;
+      // Only a face that actually references a texture gets one. Falling back to
+      // textures[0] would smear the model's main texture across untextured faces —
+      // which is exactly what hitbox/collision elements are: real faces, no texture
+      // assigned. Measured on cosmere's vinebud_hitbox (6 faces, 0 textured) and
+      // riab's collision1..8 (6 faces each, 0 textured, and left visible).
+      const texture =
+        typeof face?.texture === "number"
+          ? textures[face.texture] ?? blankTexture
+          : blankTexture;
 
       if (texture === blankTexture) {
         materials.push(new THREE.MeshLambertMaterial({ map: blankTexture, color: 0xb0b0b0 }));
@@ -443,9 +488,6 @@ function buildModel(
   const root = new THREE.Group();
   const bones: Record<string, THREE.Group> = {};
   const boneRestPositions: Record<string, THREE.Vector3> = {};
-
-  const groupMap: Record<string, BBGroup> = {};
-  for (const group of bbmodel.groups ?? []) groupMap[group.uuid] = group;
 
   const processNode = (
     node: Exclude<BBOutlinerNode, string>,
@@ -584,7 +626,8 @@ function buildModel(
     root,
     clips,
     animatedTextures,
-    elements: elements.length,
+    // Collision helpers are metadata, so they don't count as model elements.
+    elements: elements.length - hidden,
     textures: textures.length,
     skipped,
   };
