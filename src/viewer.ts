@@ -370,15 +370,21 @@ function buildModel(
 
       // Placeholder faces keep BoxGeometry's default 0..1 UVs.
       const info = infoOf(texture);
-      // Both axes divide by the UV space, not the image size. Dividing U by the
-      // image width would squash it whenever the UV space is narrower than the
-      // image, sampling only part of the texture while V covered all of it.
-      if (!info.uvWidth || !info.uvHeight) return;
+      // Face UVs are in *image pixel* coordinates. Measured on three models whose
+      // uv_width/uv_height differ from the image: crystal_golem (UVs 0..60 over a
+      // 128x128 image whose painted content ends at 59), house and gloomper — the
+      // UVs always track the image, never the uv space. So both axes divide by the
+      // image size.
+      //
+      // The exception is a flipbook, where the UVs live inside a single frame, so
+      // V runs over the frame height and repeat/offset select the frame band.
+      if (!info.width || !info.height) return;
+      const vScale = info.isAnimated ? info.uvHeight : info.height;
 
-      const u0 = uvs[0] / info.uvWidth;
-      const v0 = 1 - uvs[1] / info.uvHeight;
-      const u1 = uvs[2] / info.uvWidth;
-      const v1 = 1 - uvs[3] / info.uvHeight;
+      const u0 = uvs[0] / info.width;
+      const v0 = 1 - uvs[1] / vScale;
+      const u1 = uvs[2] / info.width;
+      const v1 = 1 - uvs[3] / vScale;
 
       let corners = [
         new THREE.Vector2(u0, v0), // TL

@@ -158,6 +158,80 @@
         return sliced;
       }
 
+      /**
+       * Face UVs are in image pixel coordinates, so the geometry's normalized UV
+       * range must equal the raw UV range divided by the image size. Dividing by
+       * uv_width/uv_height instead scales the texture wrongly.
+       *
+       * Skipped when the model mixes texture sizes, or when some face has no UV
+       * (those keep BoxGeometry's default 0..1 range and would skew the bounds).
+       */
+      function uvScaleProblem(bbmodel) {
+        const textures = bbmodel.textures || [];
+        if (textures.length === 0) return null;
+
+        const sizes = new Set(
+          textures.map((t) => (t.width || t.uv_width) + "x" + (t.height || t.uv_height)),
+        );
+        if (sizes.size !== 1) return null;
+        const [imageWidth, imageHeight] = [...sizes][0].split("x").map(Number);
+        if (!imageWidth || !imageHeight) return null;
+
+        const elements = bbmodel.elements || [];
+        for (const element of elements) {
+          for (const face of Object.values(element.faces || {})) {
+            if (!face || !face.uv) return null;
+          }
+        }
+
+        let rawMinU = Infinity, rawMaxU = -Infinity, rawMinV = Infinity, rawMaxV = -Infinity;
+        for (const element of elements) {
+          for (const face of Object.values(element.faces || {})) {
+            rawMinU = Math.min(rawMinU, face.uv[0], face.uv[2]);
+            rawMaxU = Math.max(rawMaxU, face.uv[0], face.uv[2]);
+            rawMinV = Math.min(rawMinV, face.uv[1], face.uv[3]);
+            rawMaxV = Math.max(rawMaxV, face.uv[1], face.uv[3]);
+          }
+        }
+        if (!Number.isFinite(rawMinU)) return null;
+
+        let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+        scene.traverse((node) => {
+          const uv = node.geometry && node.geometry.attributes && node.geometry.attributes.uv;
+          if (!uv) return;
+          for (let i = 0; i < uv.count; i += 1) {
+            const u = uv.getX(i);
+            const v = uv.getY(i);
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+            if (v < minV) minV = v;
+            if (v > maxV) maxV = v;
+          }
+        });
+        if (!Number.isFinite(minU)) return null;
+
+        const expected = {
+          minU: rawMinU / imageWidth,
+          maxU: rawMaxU / imageWidth,
+          minV: 1 - rawMaxV / imageHeight,
+          maxV: 1 - rawMinV / imageHeight,
+        };
+        const tolerance = 0.02;
+        const off =
+          Math.abs(minU - expected.minU) > tolerance ||
+          Math.abs(maxU - expected.maxU) > tolerance ||
+          Math.abs(minV - expected.minV) > tolerance ||
+          Math.abs(maxV - expected.maxV) > tolerance;
+
+        if (!off) return null;
+        const fmt = (a, b, c, d) =>
+          "u[" + a.toFixed(3) + "," + b.toFixed(3) + "] v[" + c.toFixed(3) + "," + d.toFixed(3) + "]";
+        return (
+          "UV scale mismatch: got " + fmt(minU, maxU, minV, maxV) +
+          " expected " + fmt(expected.minU, expected.maxU, expected.minV, expected.maxV)
+        );
+      }
+
       function poseSignature() {
         let signature = "";
         mixer.getRoot().traverse((node) => {
@@ -230,6 +304,13 @@
           // flipbook frames flips 20x/second, which is the flicker this guards.
           if (loaded.animations.length === 0 && hasSlicedTexture()) {
             problems.push("static model has a texture sliced into flipbook frames");
+          }
+
+          try {
+            const uvProblem = uvScaleProblem(JSON.parse(text));
+            if (uvProblem) problems.push(uvProblem);
+          } catch {
+            /* unparsable model: the loader would have thrown already */
           }
 
           let poseCount = 0;
