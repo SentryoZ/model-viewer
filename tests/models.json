@@ -6,7 +6,7 @@
   { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/rika.bbmodel", "note": "animated" },
   { "repo": "RadonCoding/jujutsu-kaisen", "path": "gfx/toad.bbmodel", "note": "animated" },
   { "repo": "MineLittlePony/MineLittlePony", "path": "assets/dragon.bbmodel", "note": "mesh elements + no groups array" },
-  { "repo": "Gilgames32/vixen", "path": "model.bbmodel", "note": "mesh elements, 14 textures" },
+  { "repo": "Gilgames32/vixen", "path": "model.bbmodel", "note": "mesh elements, 14 textures; bones carry rest rotations, so it exercises rotation keyframes being offsets", "expectRestRotationKept": true },
   { "repo": "tomast1337/betasharp", "path": "BetaSharp/assets/models/entities/spider.bbmodel", "note": "no textures, elements with no faces key" },
   { "repo": "hammy275/immersive-mc", "path": "model/TestCube.bbmodel", "note": "no textures, single cube" },
   { "repo": "hammy275/immersive-mc", "path": "model/BagDetailed.bbmodel", "note": "inline group metadata" },
@@ -15,7 +15,8 @@
   { "repo": "quek04/undergarden", "path": "models/rotbelcher.bbmodel", "note": "animated" },
   { "repo": "quek04/undergarden", "path": "models/auxron.bbmodel", "note": "large model" },
   { "repo": "DaFuqs/Spectrum", "path": "raw/models/manxi.bbmodel", "note": "inline group metadata" },
-  { "repo": "MysticMods/Roots", "path": "raw/model/house.bbmodel", "note": "inline group metadata, java_block" },
+  { "repo": "JustEmSeeModding/TheDungeon", "path": "blockbench/crystal_golem.bbmodel", "note": "128x128 image with a 64x64 UV space — was sliced into bogus flipbook frames and flickered" },
+  { "repo": "MysticMods/Roots", "path": "raw/model/house.bbmodel", "note": "inline group metadata, java_block; 32x32 image with a 16x16 UV space, no clips" },
   { "repo": "CSneko/toNeko", "path": "models/grmmy_neko.bbmodel", "note": "animated_entity_model" },
   { "repo": "LudoCrypt/The-Corners", "path": "Corvus.bbmodel", "note": "modded_entity" },
   { "repo": "alegian/thavma", "path": "raw-assets/book.bbmodel", "note": "java_block, outliner of element refs only" }

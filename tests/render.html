@@ -55,6 +55,13 @@
       const MIN_VISIBLE_PERCENT = 0.5;
       const MIN_POSES_WHEN_ANIMATED = 2;
       const POSES_TO_SAMPLE = 40;
+      /**
+       * Degrees a bone may move when a clip is evaluated at t=0. Every model in
+       * tests/models.json measures 0.0deg — authored animations start at the rest
+       * pose — so this carries a wide margin while still catching a discarded rest
+       * rotation (the vixen's arms snap 20deg when keyframes are read as absolute).
+       */
+      const MAX_REST_SNAP_DEGREES = 15;
 
       const log = (line, cls) => {
         const el = document.createElement("span");
@@ -71,6 +78,33 @@
         mixer = this;
         return originalClipAction.apply(this, args);
       };
+
+      // Capture the scene and camera to check which side the default view is on.
+      let scene = null;
+      const originalSceneAdd = THREE.Scene.prototype.add;
+      THREE.Scene.prototype.add = function (...args) {
+        scene = this;
+        return originalSceneAdd.apply(this, args);
+      };
+      let camera = null;
+      const originalProjection = THREE.PerspectiveCamera.prototype.updateProjectionMatrix;
+      THREE.PerspectiveCamera.prototype.updateProjectionMatrix = function () {
+        camera = this;
+        return originalProjection.call(this);
+      };
+
+      /**
+       * Minecraft/Blockbench models are authored facing -Z (heads sit at negative
+       * Z), so a camera on the +Z side of the model is looking at its back.
+       */
+      function cameraViewsTheBack() {
+        if (!camera || !scene) return false;
+        const root = scene.children.find((child) => child.isGroup);
+        if (!root) return false;
+        const box = new THREE.Box3().setFromObject(root);
+        if (box.isEmpty()) return false;
+        return camera.position.z >= box.getCenter(new THREE.Vector3()).z;
+      }
 
       function runFrame() {
         const cb = window.__pendingFrame;
@@ -100,6 +134,28 @@
           }
         }
         return (100 * drawn) / (w * h);
+      }
+
+      /**
+       * True if any material's texture was sliced into flipbook frames. A
+       * flipbook sets repeat.y to 1/frameCount and nudges offset.y; a plain
+       * texture leaves both alone.
+       */
+      function hasSlicedTexture() {
+        if (!scene) return false;
+        let sliced = false;
+        scene.traverse((node) => {
+          const materials = Array.isArray(node.material)
+            ? node.material
+            : node.material
+              ? [node.material]
+              : [];
+          for (const material of materials) {
+            const map = material.map;
+            if (map && (map.repeat.y !== 1 || map.offset.y !== 0)) sliced = true;
+          }
+        });
+        return sliced;
       }
 
       function poseSignature() {
@@ -149,6 +205,13 @@
           const text = await response.text();
           const loaded = await viewer.load(text);
 
+          // Snapshot the rest pose *before* any frame drives the mixer, otherwise
+          // the pose is already animated and the comparison below is meaningless.
+          const restPose = new Map();
+          if (mixer) {
+            mixer.getRoot().traverse((node) => restPose.set(node.uuid, node.quaternion.clone()));
+          }
+
           const immediate = canvasVisiblePercent();
           if (immediate === null) problems.push("no pixel readback");
 
@@ -161,8 +224,35 @@
 
           if (immediate === 0 && settled === 0) problems.push("rendered blank");
 
+          if (cameraViewsTheBack()) problems.push("default camera views the model's back");
+
+          // A model with no clips must not animate anything. A texture sliced into
+          // flipbook frames flips 20x/second, which is the flicker this guards.
+          if (loaded.animations.length === 0 && hasSlicedTexture()) {
+            problems.push("static model has a texture sliced into flipbook frames");
+          }
+
           let poseCount = 0;
+          let restSnap = 0;
           if (loaded.animations.length > 0 && mixer) {
+            // Rotation keyframes are *offsets* from a bone's rest rotation, so
+            // evaluating the clip at t=0 must leave every bone essentially where it
+            // rests. Treating a keyframe as absolute instead throws the rest
+            // rotation away and shows up here as a large instantaneous snap.
+            mixer.setTime(0);
+            mixer.getRoot().traverse((node) => {
+              const before = restPose.get(node.uuid);
+              if (!before) return;
+              const deg = THREE.MathUtils.radToDeg(before.angleTo(node.quaternion));
+              if (deg > restSnap) restSnap = deg;
+            });
+            // "t=0 equals rest" only holds for clips authored to start at the rest
+            // pose, so the failure is gated on the model declaring it — a clip can
+            // legitimately open mid-pose. restsnap is reported for every model.
+            if (model.expectRestRotationKept && restSnap > MAX_REST_SNAP_DEGREES) {
+              problems.push("rest rotation discarded at t=0 (" + restSnap.toFixed(1) + "deg snap)");
+            }
+
             const poses = new Set();
             for (let i = 0; i < POSES_TO_SAMPLE; i += 1) {
               mixer.update(0.1);
@@ -180,6 +270,7 @@
             " skipped=" + loaded.skipped +
             " anims=" + loaded.animations.length +
             " poses=" + poseCount +
+            " restsnap=" + restSnap.toFixed(1) + "deg" +
             " visible=" + (settled === null ? "?" : settled.toFixed(2) + "%");
 
           if (problems.length > 0) {

@@ -82,6 +82,8 @@ export interface BBModel {
 interface TextureInfo {
   width: number;
   height: number;
+  /** Width of the UV space the model's face coordinates are written in. */
+  uvWidth: number;
   uvHeight: number;
   isAnimated?: boolean;
   frameCount?: number;
@@ -262,12 +264,21 @@ function buildModel(
     const texture = loadTexture(entry.source ?? "");
     const width = entry.width || entry.uv_width || resolution.width;
     const height = entry.height || entry.uv_height || resolution.height;
+    // The UV space the model's face coordinates are written in. It normally
+    // matches the image, but may be smaller — a 128x128 image with a 64x64 UV
+    // space is still a single static texture, not a stack of frames.
+    const uvWidth = entry.uv_width || width;
     const uvHeight = entry.uv_height || height;
 
-    const info: TextureInfo = { width, height, uvHeight };
+    const info: TextureInfo = { width, height, uvWidth, uvHeight };
     texture.userData = info;
 
-    if (height > uvHeight && uvHeight > 0) {
+    // A flipbook is a *full-width* vertical strip: `frameCount` frames of
+    // uvWidth x uvHeight stacked top to bottom. Requiring uvWidth === width is
+    // what separates that from a texture whose UV space is simply smaller than
+    // its image; without it the image gets sliced into bogus frames and the model
+    // flickers between them.
+    if (uvWidth === width && height > uvHeight && uvHeight > 0) {
       const frameCount = Math.floor(height / uvHeight);
       if (frameCount > 1) {
         texture.wrapS = THREE.RepeatWrapping;
@@ -292,6 +303,17 @@ function buildModel(
   const elementObjects: Record<string, THREE.Object3D> = {};
   const elements = bbmodel.elements ?? [];
   let skipped = 0;
+
+  /**
+   * Rest rotation in degrees, per bone/element uuid.
+   *
+   * Blockbench stores animation rotation keyframes as *offsets* from the rest
+   * rotation, exactly like position keyframes are offsets from the rest position.
+   * A bone whose rest rotation is `[0, 0, -20]` with a keyframe of `[0, 0, 0]`
+   * keeps that -20 tilt. Treating the keyframe as absolute discards the rest
+   * rotation — which is what makes a head look up when the animation wants down.
+   */
+  const restRotations: Record<string, [number, number, number]> = {};
 
   // Faces with nothing to sample still need a map: a material that combines
   // alphaTest with no texture discards every fragment, and hiding the material
@@ -348,11 +370,14 @@ function buildModel(
 
       // Placeholder faces keep BoxGeometry's default 0..1 UVs.
       const info = infoOf(texture);
-      if (!info.width || !info.uvHeight) return;
+      // Both axes divide by the UV space, not the image size. Dividing U by the
+      // image width would squash it whenever the UV space is narrower than the
+      // image, sampling only part of the texture while V covered all of it.
+      if (!info.uvWidth || !info.uvHeight) return;
 
-      const u0 = uvs[0] / info.width;
+      const u0 = uvs[0] / info.uvWidth;
       const v0 = 1 - uvs[1] / info.uvHeight;
-      const u1 = uvs[2] / info.width;
+      const u1 = uvs[2] / info.uvWidth;
       const v1 = 1 - uvs[3] / info.uvHeight;
 
       let corners = [
@@ -402,6 +427,9 @@ function buildModel(
     if (uuid) {
       object.uuid = uuid;
       elementObjects[uuid] = object;
+      restRotations[uuid] = rotation
+        ? [toNumber(rotation[0]), toNumber(rotation[1]), toNumber(rotation[2])]
+        : [0, 0, 0];
     }
   }
 
@@ -445,6 +473,11 @@ function buildModel(
     if (group.rotation) {
       bone.rotation.copy(toRadians(group.rotation));
     }
+    restRotations[group.uuid] = [
+      toNumber(group.rotation?.[0]),
+      toNumber(group.rotation?.[1]),
+      toNumber(group.rotation?.[2]),
+    ];
 
     parent.add(bone);
 
@@ -507,9 +540,14 @@ function buildModel(
         if (!point) continue;
 
         if (keyframe.channel === "rotation") {
+          const rest = restRotations[targetUuid] ?? [0, 0, 0];
           rotationFrames.push({
             time: keyframe.time,
-            degrees: [toNumber(point.x), toNumber(point.y), toNumber(point.z)],
+            degrees: [
+              rest[0] + toNumber(point.x),
+              rest[1] + toNumber(point.y),
+              rest[2] + toNumber(point.z),
+            ],
           });
         } else if (keyframe.channel === "position") {
           positionTimes.push(keyframe.time);
@@ -684,7 +722,10 @@ export function createViewer(
     const radius = Math.max(size.length() / 2, 1);
 
     const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.25;
-    const direction = new THREE.Vector3(1, 0.55, 1).normalize();
+    // Minecraft/Blockbench models are authored facing -Z — every model checked
+    // puts the head at negative Z (spider -3, mog -6, golem -10). A camera on +Z
+    // therefore looks at the model's back, so the default view sits on -Z.
+    const direction = new THREE.Vector3(1, 0.55, -1).normalize();
 
     camera.position.copy(center).addScaledVector(direction, distance);
     camera.near = Math.max(distance / 100, 0.01);
